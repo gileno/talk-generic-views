@@ -1,0 +1,267 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>Generic Class-based Views (PUG-PE)</title>
+	<meta name="viewport" content="width=1024, user-scalable=no">
+	
+	<!-- Replace path with correct path to deck.core.css. -->
+	<link rel="stylesheet" href="deck.js/core/deck.core.css" type="text/css">
+	<link rel="stylesheet" href="deck.js/themes/transition/horizontal-slide.css">
+	<link rel="stylesheet" href="deck.js/extensions/hash/deck.hash.css">
+	<link rel="stylesheet" href="deck.js/extensions/navigation/deck.navigation.css">
+	
+	<!-- Any other extension CSS files go here. -->
+	<link rel="stylesheet" href="deck.js/core/common.css" type="text/css">
+	
+	<!-- Replace path with correct path to Modernizr file. -->
+	<script src="deck.js/modernizr.custom.js"></script>
+</head>
+<body class="deck-container">
+
+<!-- Create any number of elements with class slide within the container -->
+<section class="slide" id="home">
+	<h1>
+		Generic Class-based Views<br />
+		PUG-PE<br />
+		<hr />
+		<small>Gileno Filho</small><br />
+	</h1>
+</section>
+<section class="slide" id="intro">
+	<h2>O que são Generic Views?</h2>
+	<ul>
+		<li class="slide">
+			Views Genéricas :)
+		</li>
+		<li class="slide">
+			DRY (Don't repeat yourself)
+		</li>
+		<li class="slide">
+			Muita coisa em comum (CRUD)
+		</li>
+	</ul>
+</section>
+<section class="slide" id="intro2">
+	<h2>Generic Views baseadas em Funções</h2>
+	<ul>
+		<li class="slide">
+			Função para renderizar Template, Listar Objetos, Visualizar um Objeto
+		</li>
+		<li class="slide">
+			Customizações de acordo coms parâmetros das Funções
+		</li>
+	</ul>
+</section>
+<section class="slide" id="functionbased">
+	<pre>
+def direct_to_template(request, template, extra_context=None, mimetype=None, **kwargs):
+    """
+    Render a given template with any extra URL parameters in the context as
+    ``{{ params }}``.
+    """
+    if extra_context is None: extra_context = {}
+    dictionary = {'params': kwargs}
+    for key, value in extra_context.items():
+        if callable(value):
+            dictionary[key] = value()
+        else:
+            dictionary[key] = value
+    c = RequestContext(request, dictionary)
+    t = loader.get_template(template)
+    return HttpResponse(t.render(c), content_type=mimetype)
+	</pre>
+	<pre class="slide">
+from django.conf.urls import patterns, include, url
+urlpatterns = patterns('',
+	url(r'^alguma-url/$', "django.views.generic.simple.direct_to_template",
+		{"template": "meu_template.html"}),
+)
+	</pre>
+</section>
+<section class="slide" id="classbased1">
+	<h2>Generic Views baseadas em Classes</h2>
+	<ul>
+		<li class="slide">
+			Classes que vão substituir as antigas funções
+		</li>
+		<li class="slide">
+			Customizações baseadas em métodos e atributos
+		</li>
+		<li class="slide">
+			Com herança as customizações ficam mais fáceis
+		</li>
+		<li class="slide">
+			Todas herdam de "django.views.generic.base.View"
+		</li>
+	</ul>
+</section>
+<section class="slide" id="classbased2">
+	<pre>
+class View(object):
+    """
+    Intentionally simple parent class for all views. Only implements
+    dispatch-by-method and simple sanity checking.
+    """
+
+    http_method_names = ['get', 'post', 'put', 'delete', 'head', 'options', 'trace']
+
+    def __init__(self, **kwargs):
+        """
+        Constructor. Called in the URLconf; can contain helpful extra
+        keyword arguments, and other things.
+        """
+        # Go through keyword arguments, and either save their values to our
+        # instance, or raise an error.
+        for key, value in kwargs.iteritems():
+            setattr(self, key, value)
+
+    @classonlymethod
+    def as_view(cls, **initkwargs):
+        """
+        Main entry point for a request-response process.
+        """
+        # sanitize keyword arguments
+        for key in initkwargs:
+            if key in cls.http_method_names:
+                raise TypeError(u"You tried to pass in the %s method name as a "
+                                u"keyword argument to %s(). Don't do that."
+                                % (key, cls.__name__))
+            if not hasattr(cls, key):
+                raise TypeError(u"%s() received an invalid keyword %r" % (
+                    cls.__name__, key))
+
+        def view(request, *args, **kwargs):
+            self = cls(**initkwargs)
+            if hasattr(self, 'get') and not hasattr(self, 'head'):
+                self.head = self.get
+            return self.dispatch(request, *args, **kwargs)
+
+        # take name and docstring from class
+        update_wrapper(view, cls, updated=())
+
+        # and possible attributes set by decorators
+        # like csrf_exempt from dispatch
+        update_wrapper(view, cls.dispatch, assigned=())
+        return view
+
+    def dispatch(self, request, *args, **kwargs):
+        # Try to dispatch to the right method; if a method doesn't exist,
+        # defer to the error handler. Also defer to the error handler if the
+        # request method isn't on the approved list.
+        if request.method.lower() in self.http_method_names:
+            handler = getattr(self, request.method.lower(), self.http_method_not_allowed)
+        else:
+            handler = self.http_method_not_allowed
+        self.request = request
+        self.args = args
+        self.kwargs = kwargs
+        return handler(request, *args, **kwargs)
+
+    def http_method_not_allowed(self, request, *args, **kwargs):
+        allowed_methods = [m for m in self.http_method_names if hasattr(self, m)]
+        logger.warning('Method Not Allowed (%s): %s', request.method, request.path,
+            extra={
+                'status_code': 405,
+                'request': self.request
+            }
+        )
+        return http.HttpResponseNotAllowed(allowed_methods)
+	</pre>
+</section>
+<section class="slide" id="classbased-example">
+	<pre>
+from django.views.generic import TemplateView
+class MeuTemplateView(TemplateView):
+	template_name = "meu_template.html"
+	</pre>
+	<pre class="slide">
+from django.conf.urls import patterns, include, url
+from .views import MeuTemplateView
+urlpatterns = patterns('',
+	url(r'^alguma-url/$', MeuTemplateView.as_view()),
+)
+	</pre>
+	<pre class="slide">
+from django.conf.urls import patterns, include, url
+from django.views.generic import TemplateView
+urlpatterns = patterns('',
+	url(r'^alguma-url/$', TemplateView.as_view(template_name="meu_template.html")),
+)
+	</pre>
+</section>
+<section class="slide" id="notmagic">
+	<h2>Não é Mágica</h2>
+	<p>O método "as_view" retorna uma função</p>
+	<pre>
+class View(object):
+	....
+	@classonlymethod
+	def as_view(cls, **initkwargs):
+	    """
+	    Main entry point for a request-response process.
+	    """
+	    # sanitize keyword arguments
+	    for key in initkwargs:
+	        if key in cls.http_method_names:
+	            raise TypeError(u"You tried to pass in the %s method name as a "
+	                            u"keyword argument to %s(). Don't do that."
+	                            % (key, cls.__name__))
+	        if not hasattr(cls, key):
+	            raise TypeError(u"%s() received an invalid keyword %r" % (
+	                cls.__name__, key))
+
+	    def view(request, *args, **kwargs):
+	        self = cls(**initkwargs)
+	        if hasattr(self, 'get') and not hasattr(self, 'head'):
+	            self.head = self.get
+	        return self.dispatch(request, *args, **kwargs)
+
+	    # take name and docstring from class
+	    update_wrapper(view, cls, updated=())
+
+	    # and possible attributes set by decorators
+	    # like csrf_exempt from dispatch
+	    update_wrapper(view, cls.dispatch, assigned=())
+	    return view
+	</pre>
+</section>
+<section class="slide" id="why">
+	<h2>Porque eu devo utilizar?</h2>
+	<ul>
+		<li class="slide">Simples, DRY</li>
+		<li class="slide">Diversas Views já prontas</li>
+		<li class="slide">ListView</li>
+		<li class="slide">DetailView</li>
+		<li class="slide">CreateView, UpdateView e DeleteView</li>
+	</ul>
+</section>
+<section class="slide" id="why">
+	<h2>Vamos codar?</h2>
+</section>
+<!-- Other extension HTML snippets go here, at the bottom of the deck container. -->
+
+<!-- Place the following snippet at the bottom of the deck container. -->
+<a href="#" class="deck-prev-link" title="Previous">&#8592;</a>
+<a href="#" class="deck-next-link" title="Next">&#8594;</a>
+
+<!-- deck.hash snippet -->
+<a href="." title="Permalink to this slide" class="deck-permalink">#</a>
+
+<!-- Update these paths to point to the correct files. -->
+<script src="deck.js/jquery-1.7.min.js"></script>
+<script src="deck.js/core/deck.core.js"></script>
+<script src="deck.js/extensions/hash/deck.hash.js"></script>
+<script src="deck.js/extensions/navigation/deck.navigation.js"></script>
+
+<!-- Add any other extension JS files here -->
+
+<!-- Initialize the deck. You can put this in an external file if desired. -->
+<script>
+	$(function() {
+		$.deck('.slide');
+	});
+</script>
+</body>
+</html>
